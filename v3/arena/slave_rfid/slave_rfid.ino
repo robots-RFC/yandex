@@ -2,10 +2,10 @@
 #include <rdm6300.h>
 #include "Adafruit_NeoPixel.h"
 
-#define I2C_ADDRESS   1
+#define I2C_ADDRESS   2
 
 #define LED_PIN       6
-#define NUM_LED       10
+#define NUM_LED       20
 #define RFID_PIN      4
 #define BUFFER_SIZE   32
 
@@ -24,13 +24,13 @@ const uint32_t COLOR_BLUE = led.Color(0, 0, 255);
 const uint32_t COLOR_YELLOW = led.Color(255, 100, 0);
 
 // Define station states
-enum StationState { OFF, COLLECT, DROP, ACTIVATOR, KING, WIN};
+enum StationState : uint8_t { OFF, COLLECT, DROP, ACTIVATOR, KING, WIN};
 StationState station_state = OFF;
 
 #pragma pack(1)
 struct DataPacket {
   StationState state;
-  char robot_id[8];
+  char robot_id[9];
   char robot_color;
 };
 #pragma pack()
@@ -187,13 +187,16 @@ void win(char robot_color) {
 
 // Function to handle received data
 void receiveEvent(int bytes) {
+  Serial.println("yess");
   if (bytes == sizeof(received_data)) {
     Wire.readBytes((char*)&received_data, sizeof(received_data));
 
+    /*
     Serial.println("Received Data:");
     Serial.print("Status: "); Serial.println(received_data.state);
     Serial.print("ID: "); Serial.println(received_data.robot_id);
     Serial.print("Color: "); Serial.println(received_data.robot_color);
+    */
 
     station_state = received_data.state;
 
@@ -222,6 +225,8 @@ void receiveEvent(int bytes) {
         win(received_data.robot_color);
         break;
     }
+  } else {
+    Serial.println("error");
   }
 }
 
