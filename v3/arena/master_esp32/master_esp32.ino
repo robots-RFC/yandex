@@ -56,7 +56,14 @@ struct Datasend_data {
 };
 #pragma pack()
 
-Datasend_data send_data = { COLLECT, "12345678", 'a' };  // Sample data to send
+Datasend_data send_data;
+
+struct DataPacketActivation {
+  bool station_activated;
+  char who_activated;
+};
+
+DataPacketActivation activation_data;
 
 void setup() {
   Serial.begin(115200);
@@ -64,6 +71,8 @@ void setup() {
   pinMode(RESTART_BTN_PIN, INPUT_PULLUP);
 }
 
+
+/*
 void get_slave_send_data() {
   for (uint8_t i = 1; i <= NUM_STATIONS; i++) {
     uint8_t bytes_requested = 8;
@@ -79,27 +88,35 @@ void get_slave_send_data() {
     }
   }
 }
+*/
 
 void send_station_state() {
   for (int i = 0; i < NUM_STATIONS; i++) {
     int address = all_stations[i].address;
     StationState state = all_stations[i].state;
+    send_data.state = state;
 
     if (state == DROP) {
-      send_data.state = state;
       strcpy(send_data.robot_id, red_robot_id);
       send_data.robot_color = 'r';
-    } else {
+    } else if (state == COLLECT) {
       for (int j = 0; j < NUM_TASKS; j++) {
         if (all_tasks[j].station_address == address) {
           char robot_color = all_tasks[j].robot_color;
-          //char robot_id[9] = (robot_color == 'r') ? red_robot_id : blue_robot_id;
-          send_data.state = state;
           strcpy(send_data.robot_id, (robot_color == 'r') ? red_robot_id : blue_robot_id);
           send_data.robot_color = robot_color;
           break;
         }
       }
+    } else if (state == WIN){
+      strcpy(send_data.robot_id, "");
+      
+      if (red_task_count > blue_task_count)
+        send_data.robot_color = 'r';
+      else if (red_task_count < blue_task_count)
+        send_data.robot_color = 'b';
+      else
+        send_data.robot_color = 'g';
     }
 
     Wire.beginTransmission(address);
@@ -109,6 +126,34 @@ void send_station_state() {
 }
 
 void get_station_info() {
+  for (int i = 0; i < NUM_STATIONS; i++) {
+    StationState state = all_stations[i].state;
+    int address = all_stations[i].address;
+
+    Wire.beginTransmission(address);
+    Wire.write((uint8_t*)&send_data, sizeof(send_data));  // Send struct as bytes
+    Wire.endTransmission();
+
+    if (!activation_data.station_activated){
+      continue;
+    }
+    
+    if (state == COLLECT){
+      for (int j = 0; j < NUM_TASKS; j++) {
+        if (all_tasks[j].station_address == address){
+          all_tasks[j].activated = true;
+          // !!! send request to yandex
+        }
+      }
+    }
+    
+  }
+}
+
+void change_state_win(){
+  for (int i = 0; i < NUM_STATIONS; i++){
+    all_stations[i].state = WIN;
+  }
 }
 
 void loop() {
@@ -127,7 +172,8 @@ void loop() {
       get_station_info();
     } else {
       Serial.println("Game Over!");
-      //send_win();
+      change_state_win();
+      send_station_state();
       game_state = NONE;
     }
   }

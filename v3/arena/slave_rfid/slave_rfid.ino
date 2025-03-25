@@ -27,6 +27,16 @@ const uint32_t COLOR_YELLOW = led.Color(255, 100, 0);
 enum StationState : uint8_t { OFF, COLLECT, DROP, ACTIVATOR, KING, WIN};
 StationState station_state = OFF;
 
+bool station_activated = false;
+char who_activated;
+
+struct DataPacketActivation {
+  bool station_activated;
+  char who_activated;
+}
+
+DataPacketActivation activation_data = {false, ''};
+
 #pragma pack(1)
 struct DataPacket {
   StationState state;
@@ -48,6 +58,7 @@ void setup() {
   led.show();  // Инициализация светодиодов
 
   rdm6300.begin(RFID_PIN);
+  Serial.println(activation_data.station_activated);
 }
 
 void set_led_color(int n = NUM_LED) {
@@ -63,6 +74,7 @@ void set_led_off() {
   led.show();
 }
 
+/*
 void weapon_activate(char robot_color) {
   led_color = (robot_color == 'r') ? COLOR_RED : COLOR_BLUE;
   set_led_color();
@@ -83,6 +95,7 @@ void weapon_activate(char robot_color) {
     }
   }
 }
+*/
 
 void collect_task(uint16_t robot_id, char robot_color) {
   led_color = (robot_color == 'r') ? COLOR_RED : COLOR_BLUE;
@@ -107,6 +120,7 @@ void collect_task(uint16_t robot_id, char robot_color) {
 
           if (led_count < 0) {
             Serial.println("Task Collected");
+            activation_data.station_activated = true;
             while (station_state == COLLECT) {
               set_led_off();
               delay(BLINK_DELAY);
@@ -187,8 +201,9 @@ void win(char robot_color) {
 
 // Function to handle received data
 void receiveEvent(int bytes) {
-  Serial.println("yess");
   if (bytes == sizeof(received_data)) {
+    activation_data.station_activated = true;
+    
     Wire.readBytes((char*)&received_data, sizeof(received_data));
 
     /*
@@ -232,9 +247,7 @@ void receiveEvent(int bytes) {
 
 // Function to handle data requests
 void requestEvent() {
-  //Wire.write((uint8_t*)&station_data, sizeof(station_data));  // Convert struct to bytes and send
-  //Wire.write("Slave ");           // Send a response back to the master
-  //Wire.write(I2C_ADDRESS + '0');  // Send the slave's address as part of the response
+  Wire.write((uint8_t*)&activation_data, sizeof(activation_data));
 }
 
 void loop() {
