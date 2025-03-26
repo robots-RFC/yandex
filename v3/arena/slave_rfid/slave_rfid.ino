@@ -2,16 +2,16 @@
 #include <rdm6300.h>
 #include "Adafruit_NeoPixel.h"
 
-#define I2C_ADDRESS   2
+#define I2C_ADDRESS 2
 
-#define LED_PIN       6
-#define NUM_LED       20
-#define RFID_PIN      4
-#define BUFFER_SIZE   32
+#define LED_PIN 6
+#define NUM_LED 10
+#define RFID_PIN 4
+#define BUFFER_SIZE 32
 
-#define BLINK_DELAY   100
-#define LOAD_DELAY    200
-#define READ_DELAY    100
+#define BLINK_DELAY 100
+#define LOAD_DELAY 200
+#define READ_DELAY 100
 
 Adafruit_NeoPixel led = Adafruit_NeoPixel(NUM_LED, LED_PIN, NEO_GRB + NEO_KHZ800);
 
@@ -19,12 +19,17 @@ Rdm6300 rdm6300;
 
 uint32_t led_color;
 const uint32_t COLOR_RED = led.Color(255, 0, 0);
-const uint32_t COLOR_GREEN  = led.Color(0, 255, 0);
+const uint32_t COLOR_GREEN = led.Color(0, 255, 0);
 const uint32_t COLOR_BLUE = led.Color(0, 0, 255);
 const uint32_t COLOR_YELLOW = led.Color(255, 100, 0);
 
 // Define station states
-enum StationState : uint8_t { OFF, COLLECT, DROP, ACTIVATOR, KING, WIN};
+enum StationState : uint8_t { OFF,
+                              COLLECT,
+                              DROP,
+                              ACTIVATOR,
+                              KING,
+                              WIN };
 StationState station_state = OFF;
 
 bool station_activated = false;
@@ -33,9 +38,9 @@ char who_activated;
 struct DataPacketActivation {
   bool station_activated;
   char who_activated;
-}
+};
 
-DataPacketActivation activation_data = {false, ''};
+DataPacketActivation activation_data = { false, 'n' };
 
 #pragma pack(1)
 struct DataPacket {
@@ -58,7 +63,6 @@ void setup() {
   led.show();  // Инициализация светодиодов
 
   rdm6300.begin(RFID_PIN);
-  Serial.println(activation_data.station_activated);
 }
 
 void set_led_color(int n = NUM_LED) {
@@ -202,8 +206,8 @@ void win(char robot_color) {
 // Function to handle received data
 void receiveEvent(int bytes) {
   if (bytes == sizeof(received_data)) {
-    activation_data.station_activated = true;
-    
+    activation_data.station_activated = false;
+
     Wire.readBytes((char*)&received_data, sizeof(received_data));
 
     /*
@@ -230,7 +234,7 @@ void receiveEvent(int bytes) {
         break;
       case ACTIVATOR:
         Serial.println("Station - ACTIVATOR...");
-        weapon_activate(received_data.robot_color);
+        //weapon_activate(received_data.robot_color);
         break;
       case KING:
         Serial.println("Station - KING...");
@@ -247,6 +251,11 @@ void receiveEvent(int bytes) {
 
 // Function to handle data requests
 void requestEvent() {
+  Serial.println("sent activation data");
+  Serial.print("station activated: ");
+  Serial.println(activation_data.station_activated);
+  Serial.print("who activated: ");
+  Serial.println(activation_data.who_activated);
   Wire.write((uint8_t*)&activation_data, sizeof(activation_data));
 }
 

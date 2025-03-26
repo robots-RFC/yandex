@@ -1,12 +1,13 @@
 #include <Wire.h>
+#include <HTTPClient.h>
 
 #define TCA9548A_ADDRESS 0x70  // Default I2C address of TCA9548A
 #define RESTART_BTN_PIN 4
 #define NUM_STATIONS 3
 #define NUM_TASKS 2
 
-char red_robot_id[9] = "14393707";
-char blue_robot_id[9] = "14393707";
+char red_robot_id[6] = "12876";
+char blue_robot_id[6] = "64780";
 
 int center_station_addres = 1;
 
@@ -14,15 +15,13 @@ int red_task_count = 0;
 int blue_task_count = 0;
 
 unsigned long game_start_time;
-const unsigned long duration = 5000;
+const unsigned long duration = 100000;
 
-enum GameState { NONE,
-                 TASKS,
-                 FLAG };
+enum GameState { NONE,TASKS,FLAG};
 GameState game_state = NONE;
 
 // Define station states
-enum StationState : uint8_t { OFF, COLLECT, DROP, ACTIVATOR, KING, WIN};
+enum StationState : uint8_t { OFF, COLLECT, DROP, ACTIVATOR, KING, WIN };
 
 struct Tasks {
   String task_id;
@@ -51,7 +50,7 @@ Station all_stations[NUM_STATIONS] = {
 #pragma pack(1)
 struct Datasend_data {
   StationState state;
-  char robot_id[9];
+  char robot_id[6];
   char robot_color;
 };
 #pragma pack()
@@ -65,15 +64,103 @@ struct DataPacketActivation {
 
 DataPacketActivation activation_data;
 
+const char* ssid = "your_wifi_ssid";
+const char* password = "your_wifi_password";
+const char* server_url = "http://yourserver.com/api/data";
+
+String token = "y0__xCGzMSsAxip6zQg-OyIkxILFCnLzmZ85p9Vo_ez69Ec0_XiqA";
+String org_id = "bpfofdlbl4usqgkdim8s";
+
+TaskHandle_t httpTaskHandle = NULL;
+
+#define BUFFER_SIZE 5
+String requestBuffer[BUFFER_SIZE];
+int bufferStart = 0;
+int bufferEnd = 0;
+bool bufferFull = false;
+
 void setup() {
   Serial.begin(115200);
   Wire.begin();
   pinMode(RESTART_BTN_PIN, INPUT_PULLUP);
+  connect_wifi();
+  
+  xTaskCreatePinnedToCore(
+    http_request,  // Task function
+    "HTTP_Task",      // Task name
+    8192,             // Stack size (in bytes)
+    NULL,             // Task parameter
+    1,                // Priority
+    &httpTaskHandle,  // Task handle
+    0                 // Core 0
+  );
 }
 
+void connect_wifi() {
+  Serial.print("Connecting to WiFi...");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nConnected to WiFi!");
+}
+
+void push_buffer(String requestData) {
+  if (bufferFull) {
+    Serial.println("Buffer is full, dropping request!");
+    return;
+  }
+
+  requestBuffer[bufferEnd] = requestData;
+  bufferEnd = (bufferEnd + 1) % BUFFER_SIZE;
+
+  if (bufferEnd == bufferStart) {
+    bufferFull = true;
+  }
+}
+
+bool get_buffer(String &requestData) {
+  if (bufferStart == bufferEnd && !bufferFull) {
+    return false;  // Buffer is empty
+  }
+
+  requestData = requestBuffer[bufferStart];
+  bufferStart = (bufferStart + 1) % BUFFER_SIZE;
+  bufferFull = false;
+  return true;
+}
+
+void http_request(void* parameter) {
+  for (;;) {  // Infinite loop for the task
+    String requestData;
+    
+    if (getFromBuffer(requestData)) {
+      Serial.println("Sending HTTP request: " + requestData);
+
+      if (WiFi.status() == WL_CONNECTED) {
+        HTTPClient http;
+        http.begin(server_url);
+        http.addHeader("Content-Type", "application/json");
+        
+        int httpResponseCode = http.POST(requestData);
+        if (httpResponseCode > 0) {
+          Serial.println("HTTP Response code: " + String(httpResponseCode));
+        } else {
+          Serial.println("HTTP Request failed: " + http.errorToString(httpResponseCode));
+        }
+        http.end();
+      } else {
+        Serial.println("WiFi not connected, cannot send request.");
+      }
+    }
+
+    vTaskDelay(1000 / portTICK_PERIOD_MS);  // Check buffer every second
+  }
+}
 
 /*
-void get_slave_send_data() {
+  void get_slave_send_data() {
   for (uint8_t i = 1; i <= NUM_STATIONS; i++) {
     uint8_t bytes_requested = 8;
     Wire.requestFrom(i, bytes_requested);
@@ -87,7 +174,7 @@ void get_slave_send_data() {
       Serial.println("No send_data from Slave ");
     }
   }
-}
+  }
 */
 
 void send_station_state() {
@@ -108,9 +195,9 @@ void send_station_state() {
           break;
         }
       }
-    } else if (state == WIN){
+    } else if (state == WIN) {
       strcpy(send_data.robot_id, "");
-      
+
       if (red_task_count > blue_task_count)
         send_data.robot_color = 'r';
       else if (red_task_count < blue_task_count)
@@ -130,28 +217,37 @@ void get_station_info() {
     StationState state = all_stations[i].state;
     int address = all_stations[i].address;
 
-    Wire.beginTransmission(address);
-    Wire.write((uint8_t*)&send_data, sizeof(send_data));  // Send struct as bytes
-    Wire.endTransmission();
+    Wire.requestFrom(2, sizeof(activation_data));
 
-    if (!activation_data.station_activated){
+    if (Wire.available() == sizeof(activation_data)) {
+      Wire.readBytes((byte*)&activation_data, sizeof(activation_data));
+
+      Serial.print("station activated: ");
+      Serial.println(activation_data.station_activated);
+      Serial.print("who activated: ");
+      Serial.println(activation_data.who_activated);
+    } else {
+      Serial.println("Error");
+      return;
+    }
+
+    if (!activation_data.station_activated) {
       continue;
     }
-    
-    if (state == COLLECT){
+
+    if (state == COLLECT) {
       for (int j = 0; j < NUM_TASKS; j++) {
-        if (all_tasks[j].station_address == address){
+        if (all_tasks[j].station_address == address) {
           all_tasks[j].activated = true;
-          // !!! send request to yandex
+          // !!! send request
         }
       }
     }
-    
   }
 }
 
-void change_state_win(){
-  for (int i = 0; i < NUM_STATIONS; i++){
+void change_state_win() {
+  for (int i = 0; i < NUM_STATIONS; i++) {
     all_stations[i].state = WIN;
   }
 }
