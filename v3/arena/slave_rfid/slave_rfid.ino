@@ -2,10 +2,10 @@
 #include <rdm6300.h>
 #include "Adafruit_NeoPixel.h"
 
-#define I2C_ADDRESS 3
+#define I2C_ADDRESS 4
 
 #define LED_PIN 6
-#define NUM_LED 10
+#define NUM_LED 20
 #define RFID_PIN 4
 #define BUFFER_SIZE 32
 
@@ -120,10 +120,10 @@ void collect_task(uint16_t robot_id, char robot_color) {
         if (millis() - last_change_led > LOAD_DELAY) {
           last_change_led = millis();
 
-          set_led_color(led_count);
           led_count -= 1;
+          set_led_color(led_count);
 
-          if (led_count < 0) {
+          if (led_count == 0) {
             Serial.println("Task Collected");
             activation_data.station_activated = true;
             while (station_state == COLLECT) {
@@ -139,8 +139,8 @@ void collect_task(uint16_t robot_id, char robot_color) {
       if (millis() - last_found_card > READ_DELAY) {
         if (millis() - last_change_led > LOAD_DELAY && led_count < NUM_LED) {
           last_change_led = millis();
-          set_led_color(led_count);
           led_count += 1;
+          set_led_color(led_count);
         }
       }
     }
