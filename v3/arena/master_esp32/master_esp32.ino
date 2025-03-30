@@ -1,4 +1,5 @@
 #include <Wire.h>
+#include <esp_system.h>
 //#include <WiFi.h>
 //#include <HTTPClient.h>
 //#include <WiFiClientSecure.h>
@@ -33,7 +34,7 @@ const char* org_id = "bpfofdlbl4usqgkdim8s";
 #define TCA9548A_ADDRESS 0x70  // Default I2C address of TCA9548A
 #define RESTART_BTN_PIN 4
 
-const int num_stations = 4;  
+const int num_stations = 4;
 const int num_tasks = num_stations - 1;
 
 char red_robot_id[6] = "12876";
@@ -49,10 +50,12 @@ int blue_task_count = 0;
 
 unsigned long game_start_time;
 const unsigned long duration = 1000 * 60;
+const unsigned long duration_2 = 1000 * 60;
 
 enum GameState { NONE,
                  TASKS,
-                 FLAG };
+                 FLAG,
+                 WIN };
 GameState game_state = NONE;
 
 
@@ -70,6 +73,17 @@ Tasks all_tasks[num_tasks] = {
   { "679c8736ed61c22d6e28f9b2", 3, 'b', false, false },
   { "679c8736ed61c22d6e28f9b2", 4, 'b', false, false },
 };
+
+struct Activators {
+  Strign task_id;
+  int station_address;
+  char robot_color;
+};
+
+Activators all_activators[2] = {
+  { "", -1, 'r' },
+  { "", -1, 'b' }
+}
 
 struct Station {
   int address;
@@ -231,7 +245,7 @@ void send_station_state(int address, StationState state) {
   Wire.endTransmission();
 }
 
-void get_station_info() {
+void get_tasks_info() {
   for (int i = 0; i < num_stations; i++) {
     StationState state = all_stations[i].state;
     int address = all_stations[i].address;
@@ -240,7 +254,7 @@ void get_station_info() {
     Serial.print(" ");
     Serial.println(state);
 
-    if (state == OFF){
+    if (state == OFF) {
       continue;
     }
 
@@ -249,7 +263,7 @@ void get_station_info() {
     if (Wire.available() == sizeof(activation_data)) {
       Wire.readBytes((byte*)&activation_data, sizeof(activation_data));
 
-      
+
     } else {
       Serial.println("Error");
       continue;
@@ -282,7 +296,7 @@ void get_station_info() {
 
       //push_buffer(state, "close", "679c8736ed61c22d6e28f9b2");
       for (int j = 0; j < num_tasks; j++) {
-        if (all_tasks[j].robot_color == activation_data.who_activated && all_tasks[j].activated){
+        if (all_tasks[j].robot_color == activation_data.who_activated && all_tasks[j].activated) {
           int station_address = all_tasks[j].station_address;
           Serial.print("sending station state off");
           Serial.println(station_address);
@@ -290,20 +304,48 @@ void get_station_info() {
           all_tasks[j].activated = false;
           all_tasks[j].completed = true;
 
-          for (int b = 0; b < num_stations; b++){
-            if (all_stations[b].address == station_address){
+          for (int b = 0; b < num_stations; b++) {
+            if (all_stations[b].address == station_address) {
               all_stations[b].state = OFF;
             }
           }
-          
-          if (all_tasks[j].robot_color == 'r'){
-            red_task_count ++;
+
+          if (all_tasks[j].robot_color == 'r') {
+            red_task_count++;
           } else {
-            blue_task_count ++;
+            blue_task_count++;
           }
           break;
         }
       }
+    }
+  }
+}
+
+void get_flag_info() {
+  for (int i = 0; i < num_stations; i++) {
+    StationState state = all_stations[i].state;
+    int address = all_stations[i].address;
+
+    if (state == OFF) {
+      continue;
+    }
+
+    Wire.requestFrom(address, sizeof(activation_data));
+
+    if (Wire.available() == sizeof(activation_data)) {
+      Wire.readBytes((byte*)&activation_data, sizeof(activation_data));
+
+
+    } else {
+      Serial.println("Error");
+      continue;
+    }
+
+    if (state == ACTIVATOR){
+
+    } else if (state == KING){
+      
     }
   }
 }
@@ -322,23 +364,43 @@ void send_state_all_stations() {
   }
 }
 
-void set_station_states(){
-  for (int i = 0; i < num_stations; i++){
+void set_task_states() {
+  for (int i = 0; i < num_stations; i++) {
     int address = i + 1;
     StationState state;
-    if (address == center_station_addres){
+    if (address == center_station_addres) {
       state = DROP;
     } else {
       state = COLLECT;
     }
-    
-    all_stations[i] = {address, state};
+
+    all_stations[i] = { address, state };
+  }
+}
+
+void set_flag_states() {
+  for (int i = 0; i < num_stations; i++) {
+    int address = i + 1;
+    all_stations[i] = { address, OFF };
+  }
+
+  all_stations[0] = { center_station_address, KING };
+
+  uint8_t activator_count = 0;
+  while (activator_count < 2) {
+    uint8_t randomStation = (esp_random() % 8) + 1;
+
+    if (all_stations[randomStation].state != ACTIVATOR) {
+      all_stations[randomStation].state = ACTIVATOR;
+      all_activators[activator_count].station_address = randomStation;
+      activator_count++;
+    }
   }
 }
 
 void loop() {
   if (!digitalRead(RESTART_BTN_PIN) && game_state == NONE) {
-    set_station_states();
+    set_task_states();
     send_state_all_stations();
     Serial.println("Game Started!");
     game_state = TASKS;
@@ -350,13 +412,23 @@ void loop() {
 
   if (game_state == TASKS) {
     if (millis() - game_start_time < duration) {
-      get_station_info();
+      get_tasks_info();
     } else {
-      Serial.println("Game Over!");
-      change_state_win();
+      game_state = FLAG;
+      set_flag_states();
       send_state_all_stations();
-      game_state = NONE;
     }
+  } else if (game_state == FLAG) {
+    if (millis() - game_start_time < duration_2 + duration) {
+
+    } else {
+      game_state = WIN;
+    }
+
+  } else if (game_state == WIN) {
+    Serial.println("Game Over!");
+    change_state_win();
+    send_state_all_stations();
   }
 
   delay(500);  // Reduce CPU load

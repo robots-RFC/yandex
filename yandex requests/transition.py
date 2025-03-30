@@ -23,7 +23,7 @@ update_url = 'https://api.tracker.yandex.net/v2/issues/{issue_id}/transitions/st
 url_all_transitions = 'https://api.tracker.yandex.net/v2/issues/{issue_id}/transitions'
 
 # Отправка GET-запроса для получения задач
-response = requests.post(update_url.format(issue_id = id_task[0]), headers=headers)
+response = requests.get(url_all_transitions.format(issue_id = id_task[0]), headers=headers)
 
 # Проверка статуса запроса и вывод результата
 print(f"Статус ответа: {response.status_code}")

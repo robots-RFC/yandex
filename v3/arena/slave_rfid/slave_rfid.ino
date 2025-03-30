@@ -12,6 +12,7 @@
 #define BLINK_DELAY 100
 #define LOAD_DELAY 200
 #define READ_DELAY 100
+#define WEAPON_ACTIVE 5000
 
 Adafruit_NeoPixel led = Adafruit_NeoPixel(NUM_LED, LED_PIN, NEO_GRB + NEO_KHZ800);
 
@@ -30,7 +31,7 @@ enum StationState : uint8_t { OFF,
                               ACTIVATOR,
                               KING,
                               WIN };
-                              
+
 StationState station_state = OFF;
 
 bool station_activated = false;
@@ -79,19 +80,19 @@ void set_led_off() {
   led.show();
 }
 
-/*
-void weapon_activate(char robot_color) {
+void activator_flag(char robot_color) {
   led_color = (robot_color == 'r') ? COLOR_RED : COLOR_BLUE;
   set_led_color();
-  bool card_present;
 
   while (station_state == ACTIVATOR) {
     card_present = rdm6300.get_new_tag_id();
 
     if (card_present) {
-      // send data
+      activation_data.station_activated = true;
 
-      for (int i = 0; i < 2; i++) {
+      int station_activated = millis();
+
+      while (millis() - station_activated <= WEAPON_ACTIVE){
         set_led_off();
         delay(100);
         set_led_color();
@@ -100,7 +101,6 @@ void weapon_activate(char robot_color) {
     }
   }
 }
-*/
 
 void collect_task(uint16_t robot_id, char robot_color) {
   led_color = (robot_color == 'r') ? COLOR_RED : COLOR_BLUE;
@@ -108,7 +108,7 @@ void collect_task(uint16_t robot_id, char robot_color) {
   Serial.println("Station Activated");
 
   uint16_t card_id;
-  int led_count = NUM_LED;            // Текущий светодиод
+  int led_count = NUM_LED;       // Текущий светодиод
   uint32_t last_change_led = 0;  // Время последнего изменения светодиода
   uint32_t last_found_card = 0;
 
@@ -172,7 +172,7 @@ void drop_task(uint16_t red_id) {
 
           if (led_count > NUM_LED) {
             Serial.print("Task dopped");
-            for (int i = 0; i < 3; i++){
+            for (int i = 0; i < 3; i++) {
               set_led_off();
               delay(BLINK_DELAY);
               set_led_color();
@@ -244,9 +244,12 @@ void receiveEvent(int bytes) {
         break;
       case ACTIVATOR:
         Serial.println("Station - ACTIVATOR...");
+        activator_flag(eceived_data.robot_color);
         //weapon_activate(received_data.robot_color);
         break;
       case KING:
+        //king_flag();
+        drop_task(atoi(received_data.robot_id));
         Serial.println("Station - KING...");
         break;
       case WIN:
