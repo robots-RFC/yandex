@@ -85,12 +85,13 @@ void activator_flag(char robot_color) {
   set_led_color();
 
   while (station_state == ACTIVATOR) {
-    card_present = rdm6300.get_new_tag_id();
-
+    bool card_present = rdm6300.get_new_tag_id();
+    
     if (card_present) {
+      Serial.println(card_present);
       activation_data.station_activated = true;
 
-      int station_activated = millis();
+      uint32_t station_activated = millis();
 
       while (millis() - station_activated <= WEAPON_ACTIVE){
         set_led_off();
@@ -156,8 +157,12 @@ void drop_task(uint16_t red_id) {
   uint16_t card_present;
   uint32_t last_change_led = 0;  // Время последнего изменения светодиода
   uint32_t last_found_card = 0;
+  uint32_t last_activation = 0;
 
-  while (station_state == DROP) {
+  while (station_state == DROP || station_state == KING) {
+    if (millis() - last_activation > 200){
+      activation_data.station_activated = false;
+    }
     card_present = rdm6300.get_tag_id();
 
     if (card_present) {
@@ -181,6 +186,7 @@ void drop_task(uint16_t red_id) {
             led_count = 0;
             activation_data.station_activated = true;
             activation_data.who_activated = (card_present == red_id) ? 'r' : 'b';
+            last_activation = millis();
           }
         }
       }
@@ -232,7 +238,10 @@ void receiveEvent(int bytes) {
     switch (station_state) {
       case OFF:
         Serial.println("Turning OFF station...");
-        set_led_off();
+        station_activated = false;
+        while(station_state == OFF){
+          set_led_off();
+        }
         break;
       case COLLECT:
         Serial.println("Starting COLLECT task...");
@@ -244,7 +253,7 @@ void receiveEvent(int bytes) {
         break;
       case ACTIVATOR:
         Serial.println("Station - ACTIVATOR...");
-        activator_flag(eceived_data.robot_color);
+        activator_flag(received_data.robot_color);
         //weapon_activate(received_data.robot_color);
         break;
       case KING:
@@ -254,7 +263,9 @@ void receiveEvent(int bytes) {
         break;
       case WIN:
         Serial.println("Station - WIN...");
-        win(received_data.robot_color);
+        while(station_state == WIN){
+          win(received_data.robot_color);
+        }
         break;
     }
   } else {

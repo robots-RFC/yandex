@@ -14,12 +14,60 @@ enum StationState : uint8_t { OFF,
 
 #define BUFFER_SIZE 5
 struct Request {
-  String url;
+  String task_id;
   StationState state;
 };
 
-Request requestBuffer[BUFFER_SIZE];
-int bufferCount = 0;
+Request http_buffer[BUFFER_SIZE];
+int http_head = 0;
+int http_tail = 0;
+int http_buffer_count = 0;
+
+int buffer_ring(int ptr) {
+  ptr++;
+  if (ptr > (BUFFER_SIZE - 1))
+    ptr = 0;
+  return ptr;
+}
+
+void buffer_clear() {
+  http_head = -1;
+  http_tail = -1;
+  http_buffer_count = 0;
+}
+
+void push_http_buffer(StationState state, String task_id) {
+  if (http_buffer_count < BUFFER_SIZE) {
+    Request new_request;
+
+    newRequest.state = state;
+    newRequest.task_id = task_id;
+
+    http_buffer_count++;
+    if (http_buffer_count == 1) {
+      http_head = 0;
+    }
+    http_tail = ring(http_tail);
+    http_buffer[http_tail] = elem;
+
+  } else {
+    Serial.println("Queue overflow");
+  }
+}
+
+void pop_http_buffer() {
+  if (http_buffer_count > 0) {
+    http_buffer_count--;
+    if (http_buffer_count > 0) {
+      http_head = ring(http_head);
+    } else {
+      http_head = -1;
+      http_tail = -1;
+    }
+  } else {
+    Serial.println("Queue is empty");
+  }
+}
 
 // WiFi credentials
 //const char* ssid = "pozzzitron1";
@@ -43,7 +91,7 @@ char blue_robot_id[6] = "64780";
 const char* base_url = "http://api.tracker.yandex.net/v2/issues/";
 TaskHandle_t httpTaskHandle = NULL;
 
-int center_station_addres = 1;
+int center_station_address = 1;
 
 int red_task_count = 0;
 int blue_task_count = 0;
@@ -55,7 +103,7 @@ const unsigned long duration_2 = 1000 * 60;
 enum GameState { NONE,
                  TASKS,
                  FLAG,
-                 WIN };
+                 FINISH };
 GameState game_state = NONE;
 
 
@@ -69,21 +117,21 @@ struct Tasks {
 };
 
 Tasks all_tasks[num_tasks] = {
-  { "679c8736ed61c22d6e28f9b2", 2, 'b', false, false },
-  { "679c8736ed61c22d6e28f9b2", 3, 'b', false, false },
-  { "679c8736ed61c22d6e28f9b2", 4, 'b', false, false },
+  { "679c8736ed61c22d6e28f9b2", 2, 'r', false, false },
+  { "67b2fbce626b4074db2b4ec6", 3, 'b', false, false },
+  { "67b2fd1f95b6044ad3a4ddcc", 4, 'b', false, false },
 };
 
 struct Activators {
-  Strign task_id;
+  String task_id;
   int station_address;
   char robot_color;
 };
 
 Activators all_activators[2] = {
-  { "", -1, 'r' },
-  { "", -1, 'b' }
-}
+  { "67b2fc17626b4074db2b4f4b", -1, 'r' },
+  { "67e69ed22d2ae1712cc18426", -1, 'b' }
+};
 
 struct Station {
   int address;
@@ -107,6 +155,7 @@ struct DataPacketActivation {
 
 DataPacketActivation activation_data;
 
+
 /*
 void connect_wifi() {
   Serial.print("Connecting to WiFi...");
@@ -123,7 +172,7 @@ void setup() {
   Serial.begin(115200);
   Wire.begin();
   pinMode(RESTART_BTN_PIN, INPUT_PULLUP);
-  /*connect_wifi();
+  //connect_wifi();
 
   xTaskCreatePinnedToCore(
     http_request,     // Task function
@@ -134,30 +183,45 @@ void setup() {
     &httpTaskHandle,  // Task handle
     0                 // Core 0
   );
-  */
 }
 
-/*
-void sendHttpRequest(String url, StationState state) {
+
+void sendHttpRequest(StationState state, String task_id) {
   WiFiClient client;
   HTTPClient http;
 
+  String url = String(base_url) + task_id;
+
+  switch (state) {
+    case COLLECT:
+      url += "/transitions/start_progress/_execute";
+      break;
+    case DROP:
+      url += "/transitions/close/_execute";
+      break;
+  }
+
   Serial.println("Sending request to: " + url);
 
+  /*
   http.begin(client, url);
   http.addHeader("Authorization", String("OAuth ") + token);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("X-Cloud-Org-Id", org_id);
 
-  String payload;
+  int httpResponseCode;
 
-  if (state == DROP) {
-    payload = "{\"resolution\":\"fixed\"}";
-  } else {
-    payload = "";
+  switch (state) {
+    case COLLECT:
+      httpResponseCode = http.POST("");
+      break;
+    case DROP:
+      httpResponseCode = http.POST("{\"resolution\":\"fixed\"}");
+      break;
+    case ACTIVATOR:
+      httpResponseCode = http.PATCH("{\"tags\": {\"remove\" : [\"hide-task\"] }");
+      break;
   }
-
-  int httpResponseCode = http.POST(payload);  // Empty body
 
   if (httpResponseCode > 0) {
     Serial.print("HTTP Response code: ");
@@ -169,53 +233,33 @@ void sendHttpRequest(String url, StationState state) {
   }
 
   http.end();  // Close connection
+  */
 }
 
-
-void pop_buffer() {
-  // Shift all remaining elements forward
-  for (int i = 1; i < bufferCount; i++) {
-    requestBuffer[i - 1] = requestBuffer[i];
-  }
-
-  bufferCount--;
-}
 
 void http_request(void* parameter) {
-  Serial.println("http");
-  for (;;) {  // Infinite loop for the task
-    if (bufferCount == 0) {
+  while (true) {  // Infinite loop for the task
+    if (http_buffer_count == 0) {
       continue;
     }
 
-    String url = requestBuffer[0].url;
-    StationState state = requestBuffer[0].state;
+    String task_id = http_buffer[http_head].task_id;
+    StationState state = http_buffer[http_head].state;
 
-    pop_buffer();
+    pop_http_buffer();
 
-    sendHttpRequest(url, state);
+    sendHttpRequest(state, task_id);
 
     vTaskDelay(100 / portTICK_PERIOD_MS);  // Check buffer every second
   }
 }
 
 
-bool push_buffer(StationState state, String task_id, String place) {
-  if (bufferCount == BUFFER_SIZE) {
-    Serial.println("Buffer is full, dropping request!");
-    return false;
-  }
-
-  Request newRequest;
-  newRequest.url = String(base_url) + task_id + "/transitions/" + place + "/_execute";
-  newRequest.state = state;
-
-  requestBuffer[bufferCount] = newRequest;
-  bufferCount++;
-}
-*/
-
 void send_station_state(int address, StationState state) {
+  Serial.print("sending state");
+  Serial.print(address);
+  Serial.print(" ");
+  Serial.println(state);
   Datasend_data send_data;
   send_data.state = state;
 
@@ -238,6 +282,17 @@ void send_station_state(int address, StationState state) {
       send_data.robot_color = 'b';
     else
       send_data.robot_color = 'g';
+  } else if (state == ACTIVATOR) {
+    for (int i = 0; i < 2; i++) {
+      if (all_activators[i].station_address == address) {
+        char robot_color = all_activators[i].robot_color;
+        send_data.robot_color = robot_color;
+      }
+    }
+
+  } else if (state == KING) {
+    strcpy(send_data.robot_id, red_robot_id);
+    send_data.robot_color = 'r';
   }
 
   Wire.beginTransmission(address);
@@ -245,14 +300,13 @@ void send_station_state(int address, StationState state) {
   Wire.endTransmission();
 }
 
+void get_flags_info() {
+}
+
 void get_tasks_info() {
   for (int i = 0; i < num_stations; i++) {
     StationState state = all_stations[i].state;
     int address = all_stations[i].address;
-
-    Serial.print(address);
-    Serial.print(" ");
-    Serial.println(state);
 
     if (state == OFF) {
       continue;
@@ -278,30 +332,22 @@ void get_tasks_info() {
         if (all_tasks[j].station_address == address) {
           all_tasks[j].activated = true;
           String task_id = all_tasks[j].task_id;
-          //push_buffer(state, "start_progress", task_id);
+
+          push_http_buffer(state, "start_progress", task_id);
         }
       }
     } else if (state == DROP) {
-      /*
-      if (activation_data.who_activated == 'r'){
-         if (red_task_count == num_tasks / 2) continue;
-      } else {
-        if (blue_task_count == num_tasks / 2) continue;
-      }
-      */
-      //Serial.print("station activated: ");
-      //Serial.print(activation_data.station_activated);
-      //Serial.print(" ");
-      //Serial.println(activation_data.who_activated);
-
-      //push_buffer(state, "close", "679c8736ed61c22d6e28f9b2");
       for (int j = 0; j < num_tasks; j++) {
-        if (all_tasks[j].robot_color == activation_data.who_activated && all_tasks[j].activated) {
+        if (all_tasks[j].robot_color == activation_data.who_activated && all_tasks[j].activated && !all_tasks[j].completed) {
+          push_buffer(state, "close", "679c8736ed61c22d6e28f9b2");
+
+
           int station_address = all_tasks[j].station_address;
-          Serial.print("sending station state off");
+
+          Serial.print("sending station state off - ");
           Serial.println(station_address);
           send_station_state(station_address, OFF);
-          all_tasks[j].activated = false;
+
           all_tasks[j].completed = true;
 
           for (int b = 0; b < num_stations; b++) {
@@ -342,10 +388,10 @@ void get_flag_info() {
       continue;
     }
 
-    if (state == ACTIVATOR){
+    if (state == ACTIVATOR) {
+      //push_buffer(state, "start_progress", task_id);
 
-    } else if (state == KING){
-      
+    } else if (state == KING) {
     }
   }
 }
@@ -368,7 +414,7 @@ void set_task_states() {
   for (int i = 0; i < num_stations; i++) {
     int address = i + 1;
     StationState state;
-    if (address == center_station_addres) {
+    if (address == center_station_address) {
       state = DROP;
     } else {
       state = COLLECT;
@@ -388,18 +434,19 @@ void set_flag_states() {
 
   uint8_t activator_count = 0;
   while (activator_count < 2) {
-    uint8_t randomStation = (esp_random() % 8) + 1;
+    uint8_t randomStation = (esp_random() % (num_stations - 1)) + 1;
 
     if (all_stations[randomStation].state != ACTIVATOR) {
       all_stations[randomStation].state = ACTIVATOR;
-      all_activators[activator_count].station_address = randomStation;
+      int address = all_stations[randomStation].address;
+      all_activators[activator_count].station_address = address;
       activator_count++;
     }
   }
 }
 
 void loop() {
-  if (!digitalRead(RESTART_BTN_PIN) && game_state == NONE) {
+  if (!digitalRead(RESTART_BTN_PIN)) {
     set_task_states();
     send_state_all_stations();
     Serial.println("Game Started!");
@@ -414,21 +461,23 @@ void loop() {
     if (millis() - game_start_time < duration) {
       get_tasks_info();
     } else {
-      game_state = FLAG;
+      game_state = FINISH;
+      game_start_time = millis();
       set_flag_states();
       send_state_all_stations();
     }
   } else if (game_state == FLAG) {
-    if (millis() - game_start_time < duration_2 + duration) {
-
+    if (millis() - game_start_time < duration_2) {
+      get_flags_info();
     } else {
-      game_state = WIN;
+      game_state = FINISH;
     }
 
-  } else if (game_state == WIN) {
+  } else if (game_state == FINISH) {
     Serial.println("Game Over!");
     change_state_win();
     send_state_all_stations();
+    game_state = NONE;
   }
 
   delay(500);  // Reduce CPU load
