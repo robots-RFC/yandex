@@ -4,24 +4,27 @@
 #include <RF24.h>
 #include "I2Cdev.h"
 
-#define LED_PIN 6
+#define LED_PIN 9
 #define NUM_LED 1
 Adafruit_NeoPixel led = Adafruit_NeoPixel(NUM_LED, LED_PIN, NEO_GRB + NEO_KHZ800);
 
+bool red_robot = 1;
 
 const uint32_t COLOR_RED = led.Color(255, 0, 0);
 const uint32_t COLOR_BLUE = led.Color(0, 0, 255);
+uint32_t led_color;
 
-uint32_t led_color = COLOR_RED;
-
-// Constants
-const byte address[6] = "00001";
+const byte address_red[6] = "00001";   
+const byte address_blue[6] = "00002";   
+byte address[6];
 
 #define CALIB_DURATION 2000
 #define NO_SIGNAL_TIMEOUT 2000
 
 #define x_pin A1
 #define y_pin A0
+#define BTN_PIN 2
+#define ACTIVATE_PIN 4
 
 int x_min = -500;
 int x_max = 500;
@@ -47,13 +50,27 @@ void setup() {
   // put your setup code here, to run once:
   pinMode(x_pin, INPUT);
   pinMode(y_pin, INPUT);
+  pinMode(BTN_PIN, INPUT);
+  pinMode(ACTIVATE_PIN, INPUT);
+
+  led_color = red_robot ? COLOR_RED : COLOR_BLUE;
+
+  if (red_robot){
+    strcmp(address, address_red);
+  } else{
+    strcmp(address, address_blue);
+  }
 
   led.begin();
   led.setBrightness(80);
-  led.show();  // Инициализация светодиодов
+  led.show();
 
-  pinMode(4, INPUT);
-  Serial.begin(9600);
+  Serial.begin(115200);
+
+  led.setPixelColor(0, led_color);
+  led.show();
+  delay(200);
+  
 
   radio.begin();
   radio.openWritingPipe(address);
@@ -62,16 +79,13 @@ void setup() {
 
   Wire.begin();
 
-  led.setPixelColor(0, led_color);
-  led.show();
-  delay(100);
   led.clear();
   led.show();
 }
 
 void loop() {
-  Serial.println(digitalRead(4));
-  if (digitalRead(4)) {
+  //Serial.println(digitalRead(4));
+  if (digitalRead(ACTIVATE_PIN) && digitalRead(BTN_PIN)) {
     data.weapon_active = 1;
   } else {
     data.weapon_active = 0;
@@ -81,7 +95,6 @@ void loop() {
   int y_value = analogRead(y_pin) - 500;
 
   int left_motor_value = map((y_value - x_value), x_min, x_max, 1000, 2000);
-
 
   //сигнал управления правым мотором диапазон от 1000 до 2000
   int right_motor_value = map((y_value + x_value), x_min, x_max, 1000, 2000);

@@ -4,9 +4,9 @@ import requests
 token = 'y0__xCGzMSsAxip6zQg-OyIkxILFCnLzmZ85p9Vo_ez69Ec0_XiqA'
 org_id = 'bpfofdlbl4usqgkdim8s'
 
-id_task =  ["679c8736ed61c22d6e28f9b2",
- "67b2fbce626b4074db2b4ec6",
- ]
+id_task_activator =  "67b2fc17626b4074db2b4f4b"
+id_task_6 = "67b2fd6295b6044ad3a4de06"
+id_task_5 = "67b2fd5295b6044ad3a4ddfd"
 
 # Заголовки для авторизации
 headers = {
@@ -19,11 +19,11 @@ headers = {
 url = 'https://api.tracker.yandex.net/v2/issues'
 
 # Заголовок для обновления задачи
-update_url = 'https://api.tracker.yandex.net/v2/issues/{issue_id}/transitions/start_progress/_execute'  # Placeholder for issue ID
+update_url = 'http://api.tracker.yandex.net/v2/status/{issue_id}/transitions/start_progress/_execute'  # Placeholder for issue ID
 url_all_transitions = 'https://api.tracker.yandex.net/v2/issues/{issue_id}/transitions'
 
 # Отправка GET-запроса для получения задач
-response = requests.get(url_all_transitions.format(issue_id = id_task[0]), headers=headers)
+response = requests.get(url_all_transitions.format(issue_id = "67b2fd5295b6044ad3a4ddfd"), headers=headers)
 
 # Проверка статуса запроса и вывод результата
 print(f"Статус ответа: {response.status_code}")

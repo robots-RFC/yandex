@@ -1,8 +1,8 @@
 #include <Wire.h>
 #include <esp_system.h>
-//#include <WiFi.h>
-//#include <HTTPClient.h>
-//#include <WiFiClientSecure.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 
 // Define station states
 enum StationState : uint8_t { OFF,
@@ -10,7 +10,26 @@ enum StationState : uint8_t { OFF,
                               DROP,
                               ACTIVATOR,
                               KING,
-                              WIN };
+                              WIN,
+                              SWITCH };
+
+String text_station_state(StationState state) {
+  if (state == OFF)
+    return "OFF";
+  else if (state == COLLECT)
+    return "COLLECT";
+  else if (state == ACTIVATOR)
+    return "ACTIVATOR";
+  else if (state == KING)
+    return "KING";
+  else if (state == WIN)
+    return "WIN";
+  else if (state == DROP)
+    return "DROP";
+  else if (state == SWITCH){
+    return "SWITCH";
+  }
+}
 
 #define BUFFER_SIZE 5
 struct Request {
@@ -19,55 +38,11 @@ struct Request {
 };
 
 Request http_buffer[BUFFER_SIZE];
-int http_head = 0;
-int http_tail = 0;
+int http_head = -1;
+int http_tail = -1;
 int http_buffer_count = 0;
 
-int buffer_ring(int ptr) {
-  ptr++;
-  if (ptr > (BUFFER_SIZE - 1))
-    ptr = 0;
-  return ptr;
-}
 
-void buffer_clear() {
-  http_head = -1;
-  http_tail = -1;
-  http_buffer_count = 0;
-}
-
-void push_http_buffer(StationState state, String task_id) {
-  if (http_buffer_count < BUFFER_SIZE) {
-    Request new_request;
-
-    newRequest.state = state;
-    newRequest.task_id = task_id;
-
-    http_buffer_count++;
-    if (http_buffer_count == 1) {
-      http_head = 0;
-    }
-    http_tail = ring(http_tail);
-    http_buffer[http_tail] = elem;
-
-  } else {
-    Serial.println("Queue overflow");
-  }
-}
-
-void pop_http_buffer() {
-  if (http_buffer_count > 0) {
-    http_buffer_count--;
-    if (http_buffer_count > 0) {
-      http_head = ring(http_head);
-    } else {
-      http_head = -1;
-      http_tail = -1;
-    }
-  } else {
-    Serial.println("Queue is empty");
-  }
-}
 
 // WiFi credentials
 //const char* ssid = "pozzzitron1";
@@ -76,8 +51,11 @@ const char* ssid = "Mayya";
 const char* password = "mayya_1234";
 
 // Yandex Tracker API credentials
-const char* token = "y0__xCGzMSsAxip6zQg-OyIkxILFCnLzmZ85p9Vo_ez69Ec0_XiqA";
-const char* org_id = "bpfofdlbl4usqgkdim8s";
+String token = "y0__xCGzMSsAxip6zQg-OyIkxILFCnLzmZ85p9Vo_ez69Ec0_XiqA";
+String org_id = "bpfofdlbl4usqgkdim8s";
+
+WiFiClientSecure client;
+HTTPClient http;
 
 #define TCA9548A_ADDRESS 0x70  // Default I2C address of TCA9548A
 #define RESTART_BTN_PIN 4
@@ -97,13 +75,14 @@ int red_task_count = 0;
 int blue_task_count = 0;
 
 unsigned long game_start_time;
-const unsigned long duration = 1000 * 60;
-const unsigned long duration_2 = 1000 * 60;
+const unsigned long duration = 5000;
+const unsigned long duration_2 = 5000;
 
 enum GameState { NONE,
                  TASKS,
                  FLAG,
-                 FINISH };
+                 FINISH,
+                 SWAP };
 GameState game_state = NONE;
 
 
@@ -156,23 +135,24 @@ struct DataPacketActivation {
 DataPacketActivation activation_data;
 
 
-/*
+
 void connect_wifi() {
   Serial.print("Connecting to WiFi...");
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+    delay(1000);
     Serial.print(".");
   }
   Serial.println("\nConnected to WiFi!");
+  client.setInsecure();
 }
-*/
+
 
 void setup() {
   Serial.begin(115200);
   Wire.begin();
   pinMode(RESTART_BTN_PIN, INPUT_PULLUP);
-  //connect_wifi();
+  connect_wifi();
 
   xTaskCreatePinnedToCore(
     http_request,     // Task function
@@ -185,12 +165,63 @@ void setup() {
   );
 }
 
+int buffer_ring(int ptr) {
+  ptr++;
+  if (ptr > (BUFFER_SIZE - 1))
+    ptr = 0;
+  return ptr;
+}
+
+void buffer_clear() {
+  http_head = -1;
+  http_tail = -1;
+  http_buffer_count = 0;
+}
+
+void push_http_buffer(StationState state, String task_id) {
+  Serial.print("Pushing to buffer - ");
+  Serial.println(text_station_state(state));
+  if (http_buffer_count < BUFFER_SIZE) {
+    Request new_request;
+
+    new_request.state = state;
+    new_request.task_id = task_id;
+
+    http_buffer_count++;
+    if (http_buffer_count == 1) {
+      http_head = 0;
+    }
+    http_tail = buffer_ring(http_tail);
+    http_buffer[http_tail] = new_request;
+
+    Serial.print("test ");
+    Serial.print("head ");
+    Serial.print(http_head);
+    Serial.print(" tail ");
+    Serial.print(http_tail);
+    Serial.println(text_station_state(http_buffer[http_head].state));
+
+  } else {
+    Serial.println("Queue overflow");
+  }
+}
+
+void pop_http_buffer() {
+  if (http_buffer_count > 0) {
+    http_buffer_count--;
+    if (http_buffer_count > 0) {
+      http_head = buffer_ring(http_head);
+    } else {
+      http_head = -1;
+      http_tail = -1;
+    }
+  } else {
+    Serial.println("Queue is empty");
+  }
+}
 
 void sendHttpRequest(StationState state, String task_id) {
-  WiFiClient client;
-  HTTPClient http;
-
-  String url = String(base_url) + task_id;
+  String url = "https://api.tracker.yandex.net/v2/issues/" + task_id;
 
   switch (state) {
     case COLLECT:
@@ -203,9 +234,66 @@ void sendHttpRequest(StationState state, String task_id) {
 
   Serial.println("Sending request to: " + url);
 
-  /*
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi not connected!");
+    return;
+  }
+
   http.begin(client, url);
-  http.addHeader("Authorization", String("OAuth ") + token);
+  http.addHeader("Authorization", "OAuth " + token);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("X-Cloud-Org-Id", org_id);
+
+  int httpResponseCode = -1;
+
+  switch (state) {
+    case COLLECT:
+      Serial.println("Sending COLLECT request...");
+      httpResponseCode = http.POST("");
+      break;
+    case DROP:
+      Serial.println("Sending DROP request...");
+      httpResponseCode = http.POST("{\"resolution\":\"fixed\"}");
+      break;
+    case ACTIVATOR:
+      Serial.println("Sending ACTIVATOR request...");
+      httpResponseCode = http.PATCH("{\"tags\": {\"remove\" : [\"hide-task\"] }");
+      break;
+  }
+
+  Serial.print("HTTP Response Code: ");
+  Serial.println(httpResponseCode);
+
+  if (httpResponseCode > 0) {
+    Serial.println("Server Response:");
+    Serial.println(http.getString());
+  } else {
+    Serial.println("Failed to send request! Check URL, WiFi, and API keys.");
+  }
+
+  http.end();
+}
+
+/*
+void sendHttpRequest(StationState state, String task_id) {
+  //String url = String(base_url) + task_id;
+
+  String url = "https://api.tracker.yandex.net/v2/issues/" + task_id + "/transitions/start_progress/_execute";
+
+
+  switch (state) {
+    case COLLECT:
+      url += "/transitions/start_progress/_execute";
+      break;
+    case DROP:
+      url += "/transitions/close/_execute";
+      break;
+  }
+
+  Serial.println("Sending request to: " + url);
+
+  http.begin(client, url);
+  http.addHeader("Authorization", "OAuth " + token);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("X-Cloud-Org-Id", org_id);
 
@@ -233,12 +321,15 @@ void sendHttpRequest(StationState state, String task_id) {
   }
 
   http.end();  // Close connection
-  */
 }
+
+*/
 
 
 void http_request(void* parameter) {
-  while (true) {  // Infinite loop for the task
+  while (true) {                           // Infinite loop for the task
+    vTaskDelay(100 / portTICK_PERIOD_MS);  // Check buffer every second
+
     if (http_buffer_count == 0) {
       continue;
     }
@@ -246,11 +337,11 @@ void http_request(void* parameter) {
     String task_id = http_buffer[http_head].task_id;
     StationState state = http_buffer[http_head].state;
 
+    Serial.print("got for request -");
+    Serial.println(text_station_state(state));
     pop_http_buffer();
 
     sendHttpRequest(state, task_id);
-
-    vTaskDelay(100 / portTICK_PERIOD_MS);  // Check buffer every second
   }
 }
 
@@ -259,7 +350,7 @@ void send_station_state(int address, StationState state) {
   Serial.print("sending state");
   Serial.print(address);
   Serial.print(" ");
-  Serial.println(state);
+  Serial.println(text_station_state(state));
   Datasend_data send_data;
   send_data.state = state;
 
@@ -300,9 +391,6 @@ void send_station_state(int address, StationState state) {
   Wire.endTransmission();
 }
 
-void get_flags_info() {
-}
-
 void get_tasks_info() {
   for (int i = 0; i < num_stations; i++) {
     StationState state = all_stations[i].state;
@@ -329,19 +417,16 @@ void get_tasks_info() {
 
     if (state == COLLECT) {
       for (int j = 0; j < num_tasks; j++) {
-        if (all_tasks[j].station_address == address) {
+        if (all_tasks[j].station_address == address && !all_tasks[j].activated) {
           all_tasks[j].activated = true;
           String task_id = all_tasks[j].task_id;
-
-          push_http_buffer(state, "start_progress", task_id);
+          Serial.println("In COLLECT");
+          push_http_buffer(state, task_id);
         }
       }
     } else if (state == DROP) {
       for (int j = 0; j < num_tasks; j++) {
         if (all_tasks[j].robot_color == activation_data.who_activated && all_tasks[j].activated && !all_tasks[j].completed) {
-          push_buffer(state, "close", "679c8736ed61c22d6e28f9b2");
-
-
           int station_address = all_tasks[j].station_address;
 
           Serial.print("sending station state off - ");
@@ -349,6 +434,9 @@ void get_tasks_info() {
           send_station_state(station_address, OFF);
 
           all_tasks[j].completed = true;
+          String task_id = all_tasks[j].task_id;
+          Serial.println("In DROP");
+          push_http_buffer(state, task_id);
 
           for (int b = 0; b < num_stations; b++) {
             if (all_stations[b].address == station_address) {
@@ -364,34 +452,24 @@ void get_tasks_info() {
           break;
         }
       }
-    }
-  }
-}
+    } else if (state == ACTIVATOR) {
+      Serial.print("activator color - ");
+      Serial.println(activation_data.who_activated);
 
-void get_flag_info() {
-  for (int i = 0; i < num_stations; i++) {
-    StationState state = all_stations[i].state;
-    int address = all_stations[i].address;
-
-    if (state == OFF) {
-      continue;
-    }
-
-    Wire.requestFrom(address, sizeof(activation_data));
-
-    if (Wire.available() == sizeof(activation_data)) {
-      Wire.readBytes((byte*)&activation_data, sizeof(activation_data));
-
-
-    } else {
-      Serial.println("Error");
-      continue;
-    }
-
-    if (state == ACTIVATOR) {
-      //push_buffer(state, "start_progress", task_id);
+      for (int j = 0; j < 2; j++) {
+        if (all_activators[j].robot_color == activation_data.who_activated) {
+          String task_id = all_activators[j].task_id;
+          push_http_buffer(state, task_id);
+          break;
+        }
+      }
 
     } else if (state == KING) {
+      if (activation_data.who_activated == 'r') {
+        red_task_count *= 2;
+      } else {
+        blue_task_count *= 2;
+      }
     }
   }
 }
@@ -399,6 +477,12 @@ void get_flag_info() {
 void change_state_win() {
   for (int i = 0; i < num_stations; i++) {
     all_stations[i].state = WIN;
+  }
+}
+
+void change_state_switch() {
+  for (int i = 0; i < num_stations; i++) {
+    all_stations[i].state = SWITCH;
   }
 }
 
@@ -461,14 +545,23 @@ void loop() {
     if (millis() - game_start_time < duration) {
       get_tasks_info();
     } else {
-      game_state = FINISH;
+      Serial.println("Game Mode - SWAP");
+      game_state = SWAP;
+      change_state_switch();
+      send_state_all_stations();
       game_start_time = millis();
+    }
+  } else if (game_state == SWAP) {
+    if (millis() - game_start_time > 3000) {
+      Serial.println("Game Mode - FLAG");
+      game_state = FLAG;
       set_flag_states();
       send_state_all_stations();
+      game_start_time = millis();
     }
   } else if (game_state == FLAG) {
     if (millis() - game_start_time < duration_2) {
-      get_flags_info();
+      //get_tasks_info();
     } else {
       game_state = FINISH;
     }

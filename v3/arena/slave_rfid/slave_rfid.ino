@@ -2,14 +2,14 @@
 #include <rdm6300.h>
 #include "Adafruit_NeoPixel.h"
 
-#define I2C_ADDRESS 4
+#define I2C_ADDRESS 3
 
 #define LED_PIN 6
 #define NUM_LED 20
 #define RFID_PIN 4
 #define BUFFER_SIZE 32
 
-#define BLINK_DELAY 100
+#define BLINK_DELAY 300
 #define LOAD_DELAY 200
 #define READ_DELAY 100
 #define WEAPON_ACTIVE 5000
@@ -23,6 +23,7 @@ const uint32_t COLOR_RED = led.Color(255, 0, 0);
 const uint32_t COLOR_GREEN = led.Color(0, 255, 0);
 const uint32_t COLOR_BLUE = led.Color(0, 0, 255);
 const uint32_t COLOR_YELLOW = led.Color(255, 100, 0);
+const uint32_t COLOR_PURPLE = led.Color(178, 0, 237);
 
 // Define station states
 enum StationState : uint8_t { OFF,
@@ -30,7 +31,9 @@ enum StationState : uint8_t { OFF,
                               DROP,
                               ACTIVATOR,
                               KING,
-                              WIN };
+                              WIN,
+                              SWITCH,
+                              BLINK };
 
 StationState station_state = OFF;
 
@@ -53,6 +56,12 @@ struct DataPacket {
 #pragma pack()
 
 DataPacket received_data;
+
+int led_count = 0;
+uint16_t card_present;
+uint32_t last_change_led = 0;  // Время последнего изменения светодиода
+uint32_t last_found_card = 0;
+uint32_t last_activation = 0;
 
 void setup() {
   Serial.begin(115200);
@@ -84,21 +93,19 @@ void activator_flag(char robot_color) {
   led_color = (robot_color == 'r') ? COLOR_RED : COLOR_BLUE;
   set_led_color();
 
-  while (station_state == ACTIVATOR) {
-    bool card_present = rdm6300.get_new_tag_id();
-    
-    if (card_present) {
-      Serial.println(card_present);
-      activation_data.station_activated = true;
+  bool card_present = rdm6300.get_new_tag_id();
 
-      uint32_t station_activated = millis();
+  if (card_present) {
+    Serial.println(card_present);
+    activation_data.station_activated = true;
 
-      while (millis() - station_activated <= WEAPON_ACTIVE){
-        set_led_off();
-        delay(100);
-        set_led_color();
-        delay(100);
-      }
+    uint32_t station_activated = millis();
+
+    while (millis() - station_activated <= WEAPON_ACTIVE) {
+      set_led_off();
+      delay(100);
+      set_led_color();
+      delay(100);
     }
   }
 }
@@ -108,41 +115,29 @@ void collect_task(uint16_t robot_id, char robot_color) {
   set_led_color();
   Serial.println("Station Activated");
 
-  uint16_t card_id;
-  int led_count = NUM_LED;       // Текущий светодиод
-  uint32_t last_change_led = 0;  // Время последнего изменения светодиода
-  uint32_t last_found_card = 0;
+  card_present = rdm6300.get_tag_id();
+  if (card_present == robot_id) {
+    last_found_card = millis();
+    if (millis() - last_found_card < READ_DELAY) {
+      if (millis() - last_change_led > LOAD_DELAY) {
+        last_change_led = millis();
 
-  while (station_state == COLLECT) {
-    card_id = rdm6300.get_tag_id();
-    if (card_id == robot_id) {
-      last_found_card = millis();
-      if (millis() - last_found_card < READ_DELAY) {
-        if (millis() - last_change_led > LOAD_DELAY) {
-          last_change_led = millis();
+        led_count -= 1;
+        set_led_color(led_count);
 
-          led_count -= 1;
-          set_led_color(led_count);
-
-          if (led_count == 0) {
-            Serial.println("Task Collected");
-            activation_data.station_activated = true;
-            while (station_state == COLLECT) {
-              set_led_off();
-              delay(BLINK_DELAY);
-              set_led_color();
-              delay(BLINK_DELAY);
-            }
-          }
+        if (led_count == 0) {
+          Serial.println("Task Collected");
+          activation_data.station_activated = true;
+          station_state = BLINK;
         }
       }
-    } else {
-      if (millis() - last_found_card > READ_DELAY) {
-        if (millis() - last_change_led > LOAD_DELAY && led_count < NUM_LED) {
-          last_change_led = millis();
-          led_count += 1;
-          set_led_color(led_count);
-        }
+    }
+  } else {
+    if (millis() - last_found_card > READ_DELAY) {
+      if (millis() - last_change_led > LOAD_DELAY && led_count < NUM_LED) {
+        last_change_led = millis();
+        led_count += 1;
+        set_led_color(led_count);
       }
     }
   }
@@ -153,54 +148,43 @@ void drop_task(uint16_t red_id) {
   led_color = COLOR_YELLOW;
   set_led_color();
 
-  int led_count = 0;
-  uint16_t card_present;
-  uint32_t last_change_led = 0;  // Время последнего изменения светодиода
-  uint32_t last_found_card = 0;
-  uint32_t last_activation = 0;
+  card_present = rdm6300.get_tag_id();
 
-  while (station_state == DROP || station_state == KING) {
-    if (millis() - last_activation > 200){
-      activation_data.station_activated = false;
-    }
-    card_present = rdm6300.get_tag_id();
+  if (card_present) {
+    last_found_card = millis();
+    led_color = (card_present == red_id) ? COLOR_RED : COLOR_BLUE;
 
-    if (card_present) {
-      last_found_card = millis();
-      led_color = (card_present == red_id) ? COLOR_RED : COLOR_BLUE;
+    if (millis() - last_found_card < READ_DELAY) {
+      if (millis() - last_change_led > LOAD_DELAY) {
+        last_change_led = millis();
+        set_led_color(led_count);
+        led_count += 1;
 
-      if (millis() - last_found_card < READ_DELAY) {
-        if (millis() - last_change_led > LOAD_DELAY) {
-          last_change_led = millis();
-          set_led_color(led_count);
-          led_count += 1;
-
-          if (led_count > NUM_LED) {
-            Serial.print("Task dopped");
-            for (int i = 0; i < 3; i++) {
-              set_led_off();
-              delay(BLINK_DELAY);
-              set_led_color();
-              delay(BLINK_DELAY);
-            }
-            led_count = 0;
-            activation_data.station_activated = true;
-            activation_data.who_activated = (card_present == red_id) ? 'r' : 'b';
-            last_activation = millis();
+        if (led_count > NUM_LED) {
+          Serial.print("Task dopped");
+          for (int i = 0; i < 3; i++) {
+            set_led_off();
+            delay(BLINK_DELAY);
+            set_led_color();
+            delay(BLINK_DELAY);
           }
+          led_count = 0;
+          activation_data.station_activated = true;
+          activation_data.who_activated = (card_present == red_id) ? 'r' : 'b';
+          last_activation = millis();
         }
       }
-    } else {
-      if (millis() - last_found_card > READ_DELAY) {
-        if (millis() - last_change_led > LOAD_DELAY && led_count >= 0) {
-          last_change_led = millis();
-          set_led_color(led_count);
-          led_count -= 1;
+    }
+  } else {
+    if (millis() - last_found_card > READ_DELAY) {
+      if (millis() - last_change_led > LOAD_DELAY && led_count >= 0) {
+        last_change_led = millis();
+        set_led_color(led_count);
+        led_count -= 1;
 
-          if (led_count < 0) {
-            led_color = COLOR_YELLOW;
-            set_led_color();
-          }
+        if (led_count < 0) {
+          led_color = COLOR_YELLOW;
+          set_led_color();
         }
       }
     }
@@ -234,40 +218,6 @@ void receiveEvent(int bytes) {
     */
 
     station_state = received_data.state;
-
-    switch (station_state) {
-      case OFF:
-        Serial.println("Turning OFF station...");
-        station_activated = false;
-        while(station_state == OFF){
-          set_led_off();
-        }
-        break;
-      case COLLECT:
-        Serial.println("Starting COLLECT task...");
-        collect_task(atoi(received_data.robot_id), received_data.robot_color);
-        break;
-      case DROP:
-        Serial.println("Station - DROP...");
-        drop_task(atoi(received_data.robot_id));
-        break;
-      case ACTIVATOR:
-        Serial.println("Station - ACTIVATOR...");
-        activator_flag(received_data.robot_color);
-        //weapon_activate(received_data.robot_color);
-        break;
-      case KING:
-        //king_flag();
-        drop_task(atoi(received_data.robot_id));
-        Serial.println("Station - KING...");
-        break;
-      case WIN:
-        Serial.println("Station - WIN...");
-        while(station_state == WIN){
-          win(received_data.robot_color);
-        }
-        break;
-    }
   } else {
     Serial.println("error");
   }
@@ -281,7 +231,56 @@ void requestEvent() {
   Serial.print("who activated: ");
   Serial.println(activation_data.who_activated);
   Wire.write((uint8_t*)&activation_data, sizeof(activation_data));
+  activation_data.station_activated = false;
 }
 
 void loop() {
+  switch (station_state) {
+    case OFF:
+      Serial.println("Turning OFF station...");
+      station_activated = false;
+      set_led_off();
+      break;
+
+    case COLLECT:
+      //Serial.println("Starting COLLECT task...");
+      collect_task(atoi(received_data.robot_id), received_data.robot_color);
+      break;
+
+    case DROP:
+      Serial.println("Station - DROP...");
+      drop_task(atoi(received_data.robot_id));
+      break;
+
+    case ACTIVATOR:
+      Serial.println("Station - ACTIVATOR...");
+      activator_flag(received_data.robot_color);
+      //weapon_activate(received_data.robot_color);
+      break;
+
+    case KING:
+      //king_flag();
+      drop_task(atoi(received_data.robot_id));
+      Serial.println("Station - KING...");
+      break;
+
+    case WIN:
+      //Serial.println("Station - WIN...");
+      win(received_data.robot_color);
+      break;
+
+    case SWITCH:
+      Serial.println("Station - SWITCH");
+      led_color = COLOR_PURPLE;
+      set_led_color();
+
+      break;
+
+    case BLINK:
+      set_led_off();
+      delay(BLINK_DELAY);
+      set_led_color();
+      delay(BLINK_DELAY);
+      break;
+  }
 }
