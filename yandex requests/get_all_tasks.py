@@ -12,7 +12,7 @@ headers = {
 }
 
 # URL для получения проектов
-url = 'https://api.tracker.yandex.net/v2/statuses'
+url = 'https://api.tracker.yandex.net/v2/issues'
 
 # Заголовок для обновления задачи
 update_url = 'https://api.tracker.yandex.net/v2/issues/{issue_id}/transitions/stop_progress/_execute'  # Placeholder for issue ID

@@ -35,7 +35,7 @@ HTTPClient http;          // Declare HTTPClient
 uint32_t last_weapon_activated = 0;
 bool weapon_active = 0;
 
-const uint32_t COLOR_ORANGE = strip.Color(255, 125, 14);
+const uint32_t COLOR_ORANGE = strip.Color(255, 140, 0);
 const uint32_t COLOR_GREEN = strip.Color(0, 255, 0);
 
 void connect_wifi() {

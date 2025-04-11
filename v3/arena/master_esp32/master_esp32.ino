@@ -4,34 +4,50 @@
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 
+#define BUFFER_SIZE 5
+#define RESTART_BTN_PIN 4
+#define RED_PIN
+#define GREEN_PIN
+#define BLUE_PIN
+
+// WiFi credentials
+const char* ssid = "pozzzitron1";
+//const char* ssid = "Mayya";
+const char* password = "12345678";
+//const char* password = "mayya_1234";
+
+int red_task_count = 0;
+int blue_task_count = 0;
+
+unsigned long game_start_time;
+const unsigned long duration = 1000 * 60;
+const unsigned long duration_2 = 1000 * 60;
+
+const int center_station_address = 1;
+const int num_stations = 9;
+const int num_tasks = num_stations - 1;
+
+char red_robot_id[6] = "12876";
+char blue_robot_id[6] = "64780";
+
+// Yandex Tracker API credentials
+String token = "y0__xCGzMSsAxip6zQg-OyIkxILFCnLzmZ85p9Vo_ez69Ec0_XiqA";
+String org_id = "bpfofdlbl4usqgkdim8s";
+
+WiFiClientSecure client;
+HTTPClient http;
+
+const char* base_url = "http://api.tracker.yandex.net/v2/issues/";
+TaskHandle_t httpTaskHandle = NULL;
+
 // Define station states
 enum StationState : uint8_t { OFF,
                               COLLECT,
                               DROP,
                               ACTIVATOR,
                               KING,
-                              WIN,
-                              SWITCH };
+                              WIN };
 
-String text_station_state(StationState state) {
-  if (state == OFF)
-    return "OFF";
-  else if (state == COLLECT)
-    return "COLLECT";
-  else if (state == ACTIVATOR)
-    return "ACTIVATOR";
-  else if (state == KING)
-    return "KING";
-  else if (state == WIN)
-    return "WIN";
-  else if (state == DROP)
-    return "DROP";
-  else if (state == SWITCH){
-    return "SWITCH";
-  }
-}
-
-#define BUFFER_SIZE 5
 struct Request {
   String task_id;
   StationState state;
@@ -42,50 +58,12 @@ int http_head = -1;
 int http_tail = -1;
 int http_buffer_count = 0;
 
-
-
-// WiFi credentials
-//const char* ssid = "pozzzitron1";
-const char* ssid = "Mayya";
-//const char* password = "12345678";
-const char* password = "mayya_1234";
-
-// Yandex Tracker API credentials
-String token = "y0__xCGzMSsAxip6zQg-OyIkxILFCnLzmZ85p9Vo_ez69Ec0_XiqA";
-String org_id = "bpfofdlbl4usqgkdim8s";
-
-WiFiClientSecure client;
-HTTPClient http;
-
-#define TCA9548A_ADDRESS 0x70  // Default I2C address of TCA9548A
-#define RESTART_BTN_PIN 4
-
-const int num_stations = 4;
-const int num_tasks = num_stations - 1;
-
-char red_robot_id[6] = "12876";
-char blue_robot_id[6] = "64780";
-
-const char* base_url = "http://api.tracker.yandex.net/v2/issues/";
-TaskHandle_t httpTaskHandle = NULL;
-
-int center_station_address = 1;
-
-int red_task_count = 0;
-int blue_task_count = 0;
-
-unsigned long game_start_time;
-const unsigned long duration = 5000;
-const unsigned long duration_2 = 5000;
-
 enum GameState { NONE,
                  TASKS,
                  FLAG,
-                 FINISH,
-                 SWAP };
+                 FINISH };
+
 GameState game_state = NONE;
-
-
 
 struct Tasks {
   String task_id;
@@ -96,9 +74,14 @@ struct Tasks {
 };
 
 Tasks all_tasks[num_tasks] = {
-  { "679c8736ed61c22d6e28f9b2", 2, 'r', false, false },
-  { "67b2fbce626b4074db2b4ec6", 3, 'b', false, false },
-  { "67b2fd1f95b6044ad3a4ddcc", 4, 'b', false, false },
+  { "67b2fbce626b4074db2b4ec6", 2, 'r', false, false },
+  { "679c8736ed61c22d6e28f9b2", 3, 'b', false, false },
+  { "67b2fd181271ca3fa13c7034", 4, 'r', false, false },
+  { "67b2fd5295b6044ad3a4ddfd", 5, 'b', false, false },
+  { "67b2fd6295b6044ad3a4de06", 6, 'r', false, false },
+  { "67b2fd1f95b6044ad3a4ddcc", 7, 'b', false, false },
+  { "67e69fc5987e4e66928b94f0", 8, 'r', false, false },
+  { "67b2fd431271ca3fa13c706a", 9, 'b', false, false },
 };
 
 struct Activators {
@@ -135,23 +118,49 @@ struct DataPacketActivation {
 DataPacketActivation activation_data;
 
 
+String text_station_state(StationState state) {
+  if (state == OFF)
+    return "OFF";
+  else if (state == COLLECT)
+    return "COLLECT";
+  else if (state == ACTIVATOR)
+    return "ACTIVATOR";
+  else if (state == KING)
+    return "KING";
+  else if (state == WIN)
+    return "WIN";
+  else if (state == DROP)
+    return "DROP";
+}
+
+void led(int red, int green, int blue){
+  analogWrite(RED_PIN, red);
+  analogWrite(GREEN_PIN, green);
+  analogWrite(BLUE_PIN, blue);
+}
+
 
 void connect_wifi() {
   Serial.print("Connecting to WiFi...");
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
-    delay(1000);
+    led(255, 100, 0);
+    delay(500);
+    led(0, 0, 0);
+    delay(500);
     Serial.print(".");
   }
   Serial.println("\nConnected to WiFi!");
   client.setInsecure();
 }
 
-
 void setup() {
   Serial.begin(115200);
   Wire.begin();
   pinMode(RESTART_BTN_PIN, INPUT_PULLUP);
+  pinMode(RED_PIN, OUTPUT);
+  pinMode(GREEN_PIN, OUTPUT);
+  pinMode(BLUE_PIN, OUTPUT;
   connect_wifi();
 
   xTaskCreatePinnedToCore(
@@ -193,14 +202,6 @@ void push_http_buffer(StationState state, String task_id) {
     }
     http_tail = buffer_ring(http_tail);
     http_buffer[http_tail] = new_request;
-
-    Serial.print("test ");
-    Serial.print("head ");
-    Serial.print(http_head);
-    Serial.print(" tail ");
-    Serial.print(http_tail);
-    Serial.println(text_station_state(http_buffer[http_head].state));
-
   } else {
     Serial.println("Queue overflow");
   }
@@ -230,13 +231,13 @@ void sendHttpRequest(StationState state, String task_id) {
     case DROP:
       url += "/transitions/close/_execute";
       break;
+    case ACTIVATOR:
+      url += "/transitions/start_progress/_execute";
   }
-
-  Serial.println("Sending request to: " + url);
 
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("WiFi not connected!");
-    return;
+    connect_wifi();
   }
 
   http.begin(client, url);
@@ -257,7 +258,7 @@ void sendHttpRequest(StationState state, String task_id) {
       break;
     case ACTIVATOR:
       Serial.println("Sending ACTIVATOR request...");
-      httpResponseCode = http.PATCH("{\"tags\": {\"remove\" : [\"hide-task\"] }");
+      httpResponseCode = http.POST("");
       break;
   }
 
@@ -265,65 +266,13 @@ void sendHttpRequest(StationState state, String task_id) {
   Serial.println(httpResponseCode);
 
   if (httpResponseCode > 0) {
-    Serial.println("Server Response:");
-    Serial.println(http.getString());
+    pop_http_buffer();
   } else {
     Serial.println("Failed to send request! Check URL, WiFi, and API keys.");
   }
 
   http.end();
 }
-
-/*
-void sendHttpRequest(StationState state, String task_id) {
-  //String url = String(base_url) + task_id;
-
-  String url = "https://api.tracker.yandex.net/v2/issues/" + task_id + "/transitions/start_progress/_execute";
-
-
-  switch (state) {
-    case COLLECT:
-      url += "/transitions/start_progress/_execute";
-      break;
-    case DROP:
-      url += "/transitions/close/_execute";
-      break;
-  }
-
-  Serial.println("Sending request to: " + url);
-
-  http.begin(client, url);
-  http.addHeader("Authorization", "OAuth " + token);
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("X-Cloud-Org-Id", org_id);
-
-  int httpResponseCode;
-
-  switch (state) {
-    case COLLECT:
-      httpResponseCode = http.POST("");
-      break;
-    case DROP:
-      httpResponseCode = http.POST("{\"resolution\":\"fixed\"}");
-      break;
-    case ACTIVATOR:
-      httpResponseCode = http.PATCH("{\"tags\": {\"remove\" : [\"hide-task\"] }");
-      break;
-  }
-
-  if (httpResponseCode > 0) {
-    Serial.print("HTTP Response code: ");
-    Serial.println(httpResponseCode);
-    Serial.println(http.getString());  // Print response
-  } else {
-    Serial.print("Error on sending POST: ");
-    Serial.println(httpResponseCode);
-  }
-
-  http.end();  // Close connection
-}
-
-*/
 
 
 void http_request(void* parameter) {
@@ -336,10 +285,6 @@ void http_request(void* parameter) {
 
     String task_id = http_buffer[http_head].task_id;
     StationState state = http_buffer[http_head].state;
-
-    Serial.print("got for request -");
-    Serial.println(text_station_state(state));
-    pop_http_buffer();
 
     sendHttpRequest(state, task_id);
   }
@@ -378,6 +323,14 @@ void send_station_state(int address, StationState state) {
       if (all_activators[i].station_address == address) {
         char robot_color = all_activators[i].robot_color;
         send_data.robot_color = robot_color;
+        if (robot_color == 'r') {
+          strcpy(send_data.robot_id, red_robot_id);
+        } else {
+          strcpy(send_data.robot_id, blue_robot_id);
+        }
+        Serial.print("color sending - ");
+        Serial.println(send_data.robot_color);
+        break;
       }
     }
 
@@ -407,7 +360,8 @@ void get_tasks_info() {
 
 
     } else {
-      Serial.println("Error");
+      Serial.print("Error - ");
+      Serial.println(address);
       continue;
     }
 
@@ -465,6 +419,9 @@ void get_tasks_info() {
       }
 
     } else if (state == KING) {
+      Serial.print(red_task_count);
+      Serial.print(" ");
+      Serial.print(blue_task_count);
       if (activation_data.who_activated == 'r') {
         red_task_count *= 2;
       } else {
@@ -480,11 +437,12 @@ void change_state_win() {
   }
 }
 
-void change_state_switch() {
+void change_state_off() {
   for (int i = 0; i < num_stations; i++) {
-    all_stations[i].state = SWITCH;
+    all_stations[i].state = OFF;
   }
 }
+
 
 void send_state_all_stations() {
   for (int i = 0; i < num_stations; i++) {
@@ -543,30 +501,28 @@ void loop() {
 
   if (game_state == TASKS) {
     if (millis() - game_start_time < duration) {
+      led(0, 0, 255);
       get_tasks_info();
     } else {
-      Serial.println("Game Mode - SWAP");
-      game_state = SWAP;
-      change_state_switch();
-      send_state_all_stations();
-      game_start_time = millis();
-    }
-  } else if (game_state == SWAP) {
-    if (millis() - game_start_time > 3000) {
       Serial.println("Game Mode - FLAG");
       game_state = FLAG;
+      change_state_off();
+      send_state_all_stations();
+      delay(2000);
       set_flag_states();
       send_state_all_stations();
       game_start_time = millis();
     }
   } else if (game_state == FLAG) {
     if (millis() - game_start_time < duration_2) {
-      //get_tasks_info();
+      led(255, 0, 0);
+      get_tasks_info();
     } else {
       game_state = FINISH;
     }
 
   } else if (game_state == FINISH) {
+    led(0, 255, 0);
     Serial.println("Game Over!");
     change_state_win();
     send_state_all_stations();

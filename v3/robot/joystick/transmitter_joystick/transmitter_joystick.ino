@@ -8,15 +8,13 @@
 #define NUM_LED 1
 Adafruit_NeoPixel led = Adafruit_NeoPixel(NUM_LED, LED_PIN, NEO_GRB + NEO_KHZ800);
 
-bool red_robot = 1;
+bool red_robot = 0;
 
 const uint32_t COLOR_RED = led.Color(255, 0, 0);
 const uint32_t COLOR_BLUE = led.Color(0, 0, 255);
 uint32_t led_color;
 
-const byte address_red[6] = "00001";   
-const byte address_blue[6] = "00002";   
-byte address[6];
+const byte address[6] = "00001";   
 
 #define CALIB_DURATION 2000
 #define NO_SIGNAL_TIMEOUT 2000
@@ -50,16 +48,10 @@ void setup() {
   // put your setup code here, to run once:
   pinMode(x_pin, INPUT);
   pinMode(y_pin, INPUT);
-  pinMode(BTN_PIN, INPUT);
+  pinMode(BTN_PIN, INPUT_PULLUP);
   pinMode(ACTIVATE_PIN, INPUT);
 
   led_color = red_robot ? COLOR_RED : COLOR_BLUE;
-
-  if (red_robot){
-    strcmp(address, address_red);
-  } else{
-    strcmp(address, address_blue);
-  }
 
   led.begin();
   led.setBrightness(80);
@@ -84,20 +76,22 @@ void setup() {
 }
 
 void loop() {
-  //Serial.println(digitalRead(4));
-  if (digitalRead(ACTIVATE_PIN) && digitalRead(BTN_PIN)) {
+  if (digitalRead(ACTIVATE_PIN) && !digitalRead(BTN_PIN)) {
     data.weapon_active = 1;
   } else {
     data.weapon_active = 0;
   }
-  // put your main code here, to run repeatedly:
-  int x_value = analogRead(x_pin) - 400;
-  int y_value = analogRead(y_pin) - 500;
 
-  int left_motor_value = map((y_value - x_value), x_min, x_max, 1000, 2000);
+  Serial.println(analogRead(y_pin));
+  
+  // put your main code here, to run repeatedly:
+  int x_value = analogRead(x_pin) - 313;
+  int y_value = analogRead(y_pin) - 370;
+
+  int left_motor_value = map((-y_value + x_value), x_min, x_max, 1000, 2000);
 
   //сигнал управления правым мотором диапазон от 1000 до 2000
-  int right_motor_value = map((y_value + x_value), x_min, x_max, 1000, 2000);
+  int right_motor_value = map((-y_value - x_value), x_min, x_max, 1000, 2000);
 
   data.left_motor_value = constrain(left_motor_value, 1000, 2000);
   data.right_motor_value = constrain(right_motor_value, 1000, 2000);

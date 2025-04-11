@@ -2,17 +2,21 @@
 #include <nRF24L01.h>
 #include <RF24.h>
 #include <Servo.h>
+#include <Adafruit_NeoPixel.h>
 
 #define MOTOR_MIDDLE_VALUE 1500
 #define NO_SIGNAL_TIMEOUT 1000
 #define STEP_SIZE 10
 
-#define LED_PIN 9
-#define MOTORX_PIN A1
-#define MOTORY_PIN A2
-#define MOTOR_WEAPON_PIN A3
+#define LED_PIN 2
+#define NUM_LED 10
+Adafruit_NeoPixel led = Adafruit_NeoPixel(NUM_LED, LED_PIN, NEO_GRB + NEO_KHZ800);
 
-RF24 radio(7, 8); // CE, CSN
+#define MOTORX_PIN 5
+#define MOTORY_PIN 4
+#define MOTOR_WEAPON_PIN 0
+
+RF24 radio(8, 9);  // CE, CSN
 
 const byte address[6] = "00001";
 
@@ -37,7 +41,7 @@ int currentPosZ = MOTOR_MIDDLE_VALUE;
 int currentPosHead = MOTOR_MIDDLE_VALUE;
 int currentPosEyes = MOTOR_MIDDLE_VALUE;
 
-uint32_t weapon_active = 0; 
+uint32_t weapon_active = 0;
 
 void setup() {
   Serial.begin(9600);
@@ -52,10 +56,16 @@ void setup() {
 
   motorX.writeMicroseconds(MOTOR_MIDDLE_VALUE);
   motorY.writeMicroseconds(MOTOR_MIDDLE_VALUE);
-  motorWeapon.writeMicroseconds(MOTOR_MIDDLE_VALUE);
+  motorWeapon.writeMicroseconds(1000);
 
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, HIGH);
+  led.begin();
+  led.setBrightness(80);
+  led.show();
+
+  for (int i = 0; i < NUM_LED; i++) {
+    led.setPixelColor(i, led.Color(255, 0, 0));
+  }
+  led.show();
   Serial.println("ready");
 }
 
@@ -79,6 +89,15 @@ void loop() {
     smoothMove(motorX, currentPosX, data.left_motor_value);
     smoothMove(motorY, currentPosY, data.right_motor_value);
 
+    Serial.println(data.weapon_active);
+
+    if (data.weapon_active) {
+      motorWeapon.writeMicroseconds(1800);
+    } else {
+      motorWeapon.writeMicroseconds(1000);
+    }
+
+    /*
     if (data.weapon_active){
       Serial.println("active");
       smoothMove(motorWeapon, currentWeapon, 2000);
@@ -88,13 +107,22 @@ void loop() {
     if (millis() - weapon_active > 5000){
       smoothMove(motorWeapon, currentWeapon, 1500);
     }
+    */
 
+    led.clear();
+    for (int i = 0; i < NUM_LED; i++) {
+      led.setPixelColor(i, led.Color(0, 255, 0));
+    }
+    led.show();
 
-    digitalWrite(LED_PIN, HIGH);
     lastSignalTime = millis();
   } else {
     if (millis() - lastSignalTime >= NO_SIGNAL_TIMEOUT) {
-      digitalWrite(LED_PIN, LOW);
+      led.clear();
+      for (int i = 0; i < NUM_LED; i++) {
+        led.setPixelColor(i, led.Color(255, 0, 0));
+      }
+      led.show();
       Serial.println("no signal");
 
       smoothMove(motorX, currentPosX, MOTOR_MIDDLE_VALUE);
